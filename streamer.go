@@ -1,36 +1,48 @@
 package ffmpeghelper
 
-import (
-	"io"
-)
+import "io"
 
 type Streamer struct {
-	input io.Reader
-	out   io.Writer
-	Args  []string
+	ffmpegProcess *Process
+	InputOptions  []string
+	Inputs        string
+	VideoCodec    string
+	AudioCodec    string
+	OutputFmt     string
+	OutputTarget  string
 }
 
-func (s *Streamer) SetInput(input io.Reader) {
-	s.input = input
-}
-func (s *Streamer) SetOutput(out io.Writer) {
-	s.out = out
-}
-
-// init io if not set before
-func (s *Streamer) Init() (input io.Writer, output io.Reader) {
-	var inputReader io.Reader
-	var inputWriter io.Writer
-	if s.input == nil {
-		inputReader, inputWriter = io.Pipe()
-		s.input = inputReader
+func toperator[Op any](cond bool, a Op, b Op) Op {
+	if cond {
+		return a
+	} else {
+		return b
 	}
-	var outputReader io.Reader
-	var outputWriter io.Writer
-	if s.out == nil {
-		outputReader, outputWriter = io.Pipe()
-		s.out = outputWriter
+}
+func (s *Streamer) Build() (io.Writer, io.Reader, io.Reader) {
+	args := []string{}
+	args = append(args, s.InputOptions...)
+
+	inputSrc := toperator(s.Inputs != "", s.Inputs, "pipe:0")
+	args = append(args, "-i", inputSrc)
+	vcodec := toperator(s.VideoCodec != "", s.VideoCodec, "copy")
+	args = append(args, vcodec)
+	acodec := toperator(s.AudioCodec != "", s.AudioCodec, "copy")
+	if acodec != "an" {
+		args = append(args, "-c:a", acodec)
+	} else {
+		args = append(args, "-an")
 	}
 
-	return inputWriter, outputReader
+	if s.OutputFmt != "" {
+		args = append(args, "-f", s.OutputFmt)
+	}
+	outArg := toperator(s.OutputTarget != "", s.OutputTarget, "pipe:1")
+	args = append(args, outArg)
+	s.ffmpegProcess = NewProcess("ffmpeg", args...)
+	return s.ffmpegProcess.In, s.ffmpegProcess.Out, s.ffmpegProcess.Err
+}
+
+func (s *Streamer) Run() error {
+	return s.ffmpegProcess.cmd.Run()
 }
